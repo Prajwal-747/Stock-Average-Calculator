@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Investmate: Stock Average Calculator</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+    />
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin-top: 20px;
+      }
+      .container {
+        max-width: 600px;
+      }
+      .error {
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h2 class="text-center">Investmate: Stock Average Calculator</h2>
+
+      <div
+        id="alertBox"
+        class="alert alert-danger d-none error"
+        role="alert"
+      ></div>
+
+      <!-- Broker and Category Picker -->
+      <div class="row mb-2">
+        <div class="col">
+          <label class="form-label">Broker</label>
+          <select class="form-select" id="brokerSelect"></select>
+        </div>
+        <div class="col">
+          <label class="form-label">Category</label>
+          <select class="form-select" id="categorySelect"></select>
+        </div>
+      </div>
+
+      <!-- Brokerage Inclusion Toggle -->
+      <div class="form-check form-switch mb-3">
+        <input
+          class="form-check-input"
+          type="checkbox"
+          id="includeBrokerage"
+          checked
+        />
+        <label class="form-check-label" for="includeBrokerage"
+          >Include Brokerage Charges in Calculation</label
+        >
+      </div>
+
+      <!-- Input Fields -->
+      <div class="mb-3">
+        <label class="form-label">Current Holdings (Units)</label>
+        <input
+          type="number"
+          class="form-control"
+          id="currentUnits"
+          placeholder="Enter your current stock units"
+          min="1"
+        />
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Buy Price Per Unit</label>
+        <input
+          type="number"
+          class="form-control"
+          id="buyPrice"
+          placeholder="Enter the buy price per unit"
+          min="0.01"
+        />
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Current Price Per Unit</label>
+        <input
+          type="number"
+          class="form-control"
+          id="currentPrice"
+          placeholder="Enter the current market price per unit"
+          min="0.01"
+        />
+      </div>
+      <h4 class="mt-3">Choose One:</h4>
+      <div class="mb-3">
+        <label class="form-label"
+          >Available Amount for Additional Investment</label
+        >
+        <input
+          type="number"
+          class="form-control"
+          id="availableAmount"
+          placeholder="Enter available amount"
+          min="0"
+        />
+      </div>
+      <h5 class="text-center">OR</h5>
+      <div class="mb-3">
+        <label class="form-label">Desired Average Price</label>
+        <input
+          type="number"
+          class="form-control"
+          id="desiredAverage"
+          placeholder="Enter desired average price"
+          min="0"
+        />
+      </div>
+      <button class="btn btn-success mt-2" id="calculate">
+        Calculate Required Units
+      </button>
+      <button class="btn btn-warning mt-2" id="clear">Clear Fields</button>
+
+      <h4 class="mt-3" id="result"></h4>
+    </div>
+
+    <script>
+      // Sample brokerage data (add/edit as you need)
+      const brokerageList = {
+        Zerodha: {
+          "Equity Delivery": {
+            calc: (amt) => 0, // ₹0 for delivery
+            note: "No brokerage for delivery",
+          },
+          "Equity Intraday": {
+            calc: (amt) => Math.min(amt * 0.0003, 20),
+            note: "0.03% or ₹20 max",
+          },
+        },
+        Groww: {
+          "Equity Delivery": {
+            calc: (amt) => Math.max(Math.min(amt * 0.001, 20), 5), // 0.1% or ₹20, min ₹5 (2025)
+            note: "0.1% or ₹20 max, Min ₹5",
+          },
+          "Equity Intraday": {
+            calc: (amt) => Math.max(Math.min(amt * 0.001, 20), 5), // 0.1% or ₹20, min ₹5
+            note: "0.1% or ₹20 max, Min ₹5",
+          },
+        },
+        // Add other brokers/categories and formula as needed
+      };
+
+      // --- Bootstrap Broker & Category selectors ---
+      function populatePickers() {
+        const brokerSel = document.getElementById("brokerSelect");
+        brokerSel.innerHTML = Object.keys(brokerageList)
+          .map((broker) => `<option value="${broker}">${broker}</option>`)
+          .join("");
+        populateCategoryPicker();
+        brokerSel.addEventListener("change", populateCategoryPicker);
+      }
+      function populateCategoryPicker() {
+        const broker = document.getElementById("brokerSelect").value;
+        const catSel = document.getElementById("categorySelect");
+        const categories = Object.keys(brokerageList[broker]);
+        catSel.innerHTML = categories
+          .map((cat) => `<option value="${cat}">${cat}</option>`)
+          .join("");
+      }
+      populatePickers();
+
+      // --- Error helpers ---
+      function showError(message) {
+        const alertBox = document.getElementById("alertBox");
+        alertBox.textContent = message;
+        alertBox.classList.remove("d-none");
+      }
+      function clearError() {
+        const alertBox = document.getElementById("alertBox");
+        alertBox.classList.add("d-none");
+        alertBox.textContent = "";
+      }
+
+      document
+        .getElementById("calculate")
+        .addEventListener("click", function () {
+          clearError();
+          // Input fields
+          let currentUnits = parseInt(
+            document.getElementById("currentUnits").value,
+            10
+          );
+          let buyPrice = parseFloat(document.getElementById("buyPrice").value);
+          let currentPrice = parseFloat(
+            document.getElementById("currentPrice").value
+          );
+          let availableAmount = parseFloat(
+            document.getElementById("availableAmount").value
+          );
+          let desiredAverage = parseFloat(
+            document.getElementById("desiredAverage").value
+          );
+
+          // Validation
+          if (!currentUnits || currentUnits < 1)
+            return showError("Please enter a valid current units (>0).");
+          if (!buyPrice || buyPrice <= 0)
+            return showError("Please enter a valid buy price (>0).");
+          if (!currentPrice || currentPrice <= 0)
+            return showError("Please enter a valid current price (>0).");
+          if (
+            (!availableAmount || availableAmount <= 0) &&
+            (!desiredAverage || desiredAverage <= 0)
+          )
+            return showError(
+              "Please enter either an available amount (>0) or a desired average price (>0)."
+            );
+          if (
+            availableAmount &&
+            desiredAverage &&
+            availableAmount > 0 &&
+            desiredAverage > 0
+          )
+            return showError(
+              "Please fill only one: either Available Amount or Desired Average Price."
+            );
+
+          // Broker/Category selection
+          const broker = document.getElementById("brokerSelect").value;
+          const category = document.getElementById("categorySelect").value;
+          const includeBrokerage =
+            document.getElementById("includeBrokerage").checked;
+          const getBrokerage = brokerageList[broker][category].calc;
+
+          // Calculation
+          let newUnits = 0,
+            currentInvestment = currentUnits * buyPrice,
+            totalInvestment = currentInvestment,
+            requiredAmount = 0,
+            remainingAmount = 0,
+            brokerageTotal = 0,
+            unitBrokerage = 0;
+          if (availableAmount && availableAmount > 0) {
+            // We need to account for brokerage in purchase calculation
+            if (!includeBrokerage) {
+              newUnits = Math.floor(availableAmount / currentPrice);
+              totalInvestment += newUnits * currentPrice;
+              remainingAmount = availableAmount - newUnits * currentPrice;
+              brokerageTotal = 0;
+            } else {
+              // Iteratively find max # of shares within availableAmount, including brokerage
+              let unitsPossible = Math.floor(availableAmount / currentPrice);
+              // Try decreasing if brokerage pushes total over amount
+              for (let n = unitsPossible; n > 0; n--) {
+                let amt = n * currentPrice;
+                let bro = getBrokerage(amt);
+                if (amt + bro <= availableAmount) {
+                  newUnits = n;
+                  brokerageTotal = bro;
+                  remainingAmount = availableAmount - (amt + bro);
+                  totalInvestment += amt + bro;
+                  break;
+                }
+              }
+              if (newUnits === 0)
+                return showError(
+                  "Available amount too low to buy any units after including brokerage."
+                );
+            }
+          } else if (desiredAverage && desiredAverage > 0) {
+            let numerator = desiredAverage * currentUnits - currentInvestment;
+            let denominator = currentPrice - desiredAverage;
+            if (denominator <= 0)
+              return showError(
+                "Desired average must be less than the current price."
+              );
+            newUnits = Math.ceil(numerator / denominator);
+            if (newUnits < 0)
+              return showError(
+                "Desired average is not achievable with current price!"
+              );
+            let amt = newUnits * currentPrice;
+            brokerageTotal = includeBrokerage ? getBrokerage(amt) : 0;
+            requiredAmount = amt + brokerageTotal;
+            totalInvestment += amt + brokerageTotal;
+          }
+          let newAverage = totalInvestment / (currentUnits + newUnits);
+          let totalShares = currentUnits + newUnits;
+          let brokerageLine = includeBrokerage
+            ? `<br>Brokerage for new purchase: <b>₹${brokerageTotal.toFixed(
+                2
+              )}</b> (${broker} - ${category})`
+            : "<br>Brokerage not included (for comparison)";
+
+          document.getElementById("result").innerHTML = `
+                <div class="alert alert-success">
+                    Additional Units to Buy: <b>${newUnits}</b><br>
+                    New Average Price: <b>${newAverage.toFixed(2)}</b><br>
+                    Total Shares After Purchase: <b>${totalShares}</b><br>
+                    ${
+                      availableAmount && availableAmount > 0
+                        ? `Remaining Amount: <b>${remainingAmount.toFixed(
+                            2
+                          )}</b>`
+                        : `Required Amount: <b>${requiredAmount.toFixed(2)}</b>`
+                    }
+                    ${brokerageLine}
+                </div>
+            `;
+        });
+
+      document.getElementById("clear").addEventListener("click", function () {
+        [
+          "currentUnits",
+          "buyPrice",
+          "currentPrice",
+          "availableAmount",
+          "desiredAverage",
+        ].forEach((id) => {
+          document.getElementById(id).value = "";
+        });
+        document.getElementById("result").innerHTML = "";
+        clearError();
+      });
+    </script>
+  </body>
+</html>
